@@ -46,7 +46,7 @@ func WithIterCount(count int) func(*Zypher) {
 	}
 }
 
-func (z *Zypher) AsciZyph(arg string) (string, error) {
+func (z Zypher) AsciZyph(arg string) (string, error) {
 	isValidString := regexp.MustCompile(`^[a-zA-Z0-9 ]+$`).MatchString(arg)
 
 	if !isValidString {
