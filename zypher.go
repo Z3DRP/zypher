@@ -7,16 +7,18 @@ import (
 )
 
 type Zypher struct {
-	Shift     int  // number of runes/digits to shift, defaults to 3
-	IterCount int  // number of iterations to be applied to value being zyphered, defaults to 3
-	Alternate bool // if true when odd elements will reverse shift, defaults false
+	Shift       int  // number of runes/digits to shift, defaults to 3
+	IterCount   int  // number of iterations to be applied to value being zyphered, defaults to 3
+	Alternate   bool // if true when odd elements will reverse shift, defaults false
+	IgnoreSpace bool // if true will ignore space and leave them in, defaults to false
 }
 
 func DefaultZops() *Zypher {
 	return &Zypher{
-		Shift:     3,
-		Alternate: false,
-		IterCount: 3,
+		Shift:       3,
+		Alternate:   false,
+		IterCount:   3,
+		IgnoreSpace: false,
 	}
 }
 
@@ -46,6 +48,12 @@ func WithIterCount(count int) func(*Zypher) {
 	}
 }
 
+func WithIgnoreSpace(i bool) func(*Zypher) {
+	return func(z *Zypher) {
+		z.IgnoreSpace = i
+	}
+}
+
 func (z Zypher) AsciZyph(arg string) (string, error) {
 	isValidString := regexp.MustCompile(`^[a-zA-Z0-9 ]+$`).MatchString(arg)
 
@@ -66,7 +74,7 @@ func (z Zypher) AsciZyph(arg string) (string, error) {
 				if z.Alternate {
 					alt = indx%2 != 0
 				}
-				asciShift(&result[indx], r, z.Shift, alt)
+				asciShift(&result[indx], r, z.Shift, alt, z.IgnoreSpace)
 			}()
 		}
 	}
@@ -74,7 +82,7 @@ func (z Zypher) AsciZyph(arg string) (string, error) {
 	return string(result), nil
 }
 
-func asciShift(target *rune, r rune, shf int, alt bool) {
+func asciShift(target *rune, r rune, shf int, alt bool, ignSpc bool) {
 	switch alt {
 	case true:
 		if shf > 0 {
@@ -91,5 +99,11 @@ func asciShift(target *rune, r rune, shf int, alt bool) {
 
 	} else if r >= 'a' && r <= 'z' {
 		*target = 'a' + (r-'a'+rune(shf)+26)%26
+	} else if r == ' ' {
+		if !ignSpc {
+			*target = 'x'
+		} else {
+			*target = ' '
+		}
 	}
 }
