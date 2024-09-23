@@ -10,9 +10,11 @@ import (
 )
 
 type Zypher struct {
-	Shift             int  // number of runes/digits to shift, defaults to 3
-	ShiftIterCount    int  // number of iterations to be applied to value being zyphered, defaults to 3
-	HashIterCount     int  // number of iterations to be hashed, defaults to 3
+	Shift             int // number of runes/digits to shift, defaults to 3
+	ShiftIterCount    int // number of iterations to be applied to value being zyphered, defaults to 3
+	HashIterCount     int // number of iterations to be hashed, defaults to 3
+	currentHashCount  int // number to be locked by mutex and keep track of current hash iterations performed
+	hashCountMtx      *sync.Mutex
 	Alternate         bool // if true when odd elements will reverse shift, defaults false
 	IgnoreSpace       bool // if true will ignore space and leave them in, defaults to false
 	RestrictHashShift bool // if true will only shift hash values within hahs digit range if false will shift digits outside hex range ie f could shift to j, default false
@@ -24,6 +26,8 @@ func DefaultZops() *Zypher {
 		Alternate:         false,
 		ShiftIterCount:    3,
 		HashIterCount:     3,
+		currentHashCount:  0,
+		hashCountMtx:      &sync.Mutex{},
 		IgnoreSpace:       false,
 		RestrictHashShift: false,
 	}
@@ -81,6 +85,11 @@ func (z Zypher) AsciZyph(arg string) (string, error) {
 		return "", InvalidString
 	}
 
+	if z.ShiftIterCount <= 0 {
+		MissingShiftIterCount := errors.New(`invalid zypher, shift iter count expected but not found`)
+		return "", MissingShiftIterCount
+	}
+
 	result := make([]rune, len(arg))
 	var wg sync.WaitGroup
 
@@ -96,8 +105,10 @@ func (z Zypher) AsciZyph(arg string) (string, error) {
 				asciShift(&result[indx], r, z.Shift, alt, z.IgnoreSpace)
 			}()
 		}
+		wg.Wait()
+		arg = string(result)
 	}
-	wg.Wait()
+	//wg.Wait()
 	return string(result), nil
 }
 
@@ -105,10 +116,39 @@ func (z Zypher) HexZyph(arg string) (string, error) {
 	isValidString := regexp.MustCompile(`^[a-fA-F0-9\s]+$`).MatchString(arg)
 	if !isValidString {
 		InvalidString := errors.New("invalid hex string, only A-F, a-f, and 0-9 allowed")
-		return " ", InvalidString
+		return "", InvalidString
+	}
+
+	if z.ShiftIterCount <= 0 {
+		MissingShiftIterCount := errors.New(`invalid zypher, shift iter count expected but not found`)
+		return "", MissingShiftIterCount
 	}
 	// TODO HexZyph takes a hash then shifts it shifts for each shiftItercount
+	result := make([]rune, len(arg))
+	var wg sync.WaitGroup
 
+	for i := 0; i < z.ShiftIterCount; i++ {
+		for indx, r := range arg {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				alt := false
+				if z.Alternate {
+					alt = indx%2 != 0
+				}
+				if z.RestrictHashShift {
+					hexShift(&result[indx], r, z.Shift, alt, z.IgnoreSpace)
+				}
+				if !z.RestrictHashShift {
+					shift(&result[indx], r, z.Shift, alt, z.IgnoreSpace)
+				}
+			}()
+		}
+		wg.Wait()
+		arg = string(result)
+	}
+	// wg.Wait()
+	return string(result), nil
 }
 
 func (z Zypher) Zyph(arg string) (string, error) {
@@ -118,7 +158,45 @@ func (z Zypher) Zyph(arg string) (string, error) {
 		return "", InvalidString
 	}
 
+	if z.ShiftIterCount <= 0 {
+		MissingShiftIterCount := errors.New(`invalid zypher, shift iter count expected but not found`)
+		return "", MissingShiftIterCount
+	}
+
+	if z.HashIterCount <= 0 {
+		MissingHashIterCount := errors.New(`invalid zypher, hash iter count expected but not found`)
+		return "", MissingHashIterCount
+	}
+
 	// TODO Zyph shifts string then hashes it foreach shiftItercount and foreach hashItercount
+	result := make([]rune, len(arg))
+	var wg sync.WaitGroup
+
+	for i := 0; i < z.ShiftIterCount; i++ {
+		for indx, r := range arg {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				alt := false
+				if z.Alternate {
+					alt = indx%2 != 0
+				}
+
+				shift(&result[indx], r, z.Shift, alt, z.IgnoreSpace)
+			}()
+		}
+		wg.Wait()
+		if z.currentHashCount <= z.HashIterCount {
+			hsh := sha512.New()
+			hsh.Write([]byte(string(result)))
+			bs := hsh.Sum(nil)
+			arg = hex.EncodeToString(bs)
+			z.hashCountMtx.Lock()
+			z.currentHashCount++
+			z.hashCountMtx.Unlock()
+		}
+	}
+	return string(result), nil
 }
 
 func (z Zypher) ZypHash(arg string) (string, error) {
